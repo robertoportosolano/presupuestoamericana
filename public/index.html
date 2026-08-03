@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Presupuestos por Proyecto</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{--bg:#0f172a;--panel:#1e293b;--panel2:#273449;--line:#334155;--txt:#e2e8f0;--muted:#94a3b8;--accent:#38bdf8;--ingreso:#22c55e;--egreso:#ef4444;}
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:'Segoe UI',system-ui,Arial,sans-serif;background:var(--bg);color:var(--txt);}
+  header{padding:16px 24px;border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;}
+  h1{font-size:19px;margin:0;} h1 span{color:var(--accent);}
+  .sub{color:var(--muted);font-size:12px;margin-top:2px;}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+  select,button,input{font-family:inherit;}
+  select{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:14px;}
+  button{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:13px;cursor:pointer;}
+  button:hover{background:#334155;}
+  button.primary{background:var(--accent);color:#04283b;border-color:var(--accent);font-weight:600;width:100%;padding:11px;}
+  button.danger{border-color:#7f1d1d;color:#fca5a5;}
+  main{padding:22px 24px;max-width:1500px;margin:0 auto;}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:22px;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;}
+  .card .label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.5px;}
+  .card .val{font-size:23px;font-weight:700;margin-top:6px;}
+  .card .delta{font-size:12px;margin-top:4px;color:var(--muted);}
+  .pos{color:var(--ingreso);} .neg{color:var(--egreso);}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:22px;}
+  @media(max-width:900px){.grid2{grid-template-columns:1fr;}}
+  .chartbox{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;}
+  .chartbox h3{margin:0 0 12px;font-size:14px;font-weight:600;}
+  .chartbox canvas{max-height:280px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{border:1px solid var(--line);padding:6px 8px;text-align:right;}
+  th{background:var(--panel2);} td:first-child,th:first-child{text-align:left;}
+  .tablewrap{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;overflow:auto;margin-bottom:22px;}
+  .tablewrap h3{margin:0 0 12px;font-size:14px;}
+  td input{width:92px;background:transparent;border:none;color:var(--txt);text-align:right;font-size:13px;padding:2px;}
+  td input:focus{outline:1px solid var(--accent);border-radius:4px;background:#0b1220;}
+  .rowhead{font-weight:600;} .muted{color:var(--muted);} .legend{font-size:12px;color:var(--muted);margin-top:8px;}
+  /* login */
+  #auth{max-width:380px;margin:8vh auto;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:28px;}
+  #auth h2{margin:0 0 4px;} #auth p{color:var(--muted);font-size:13px;margin:0 0 18px;}
+  #auth input{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;color:var(--txt);margin-bottom:12px;font-size:14px;}
+  #auth .switch{text-align:center;margin-top:14px;font-size:13px;color:var(--muted);}
+  #auth .switch a{color:var(--accent);cursor:pointer;}
+  .err{color:#fca5a5;font-size:13px;min-height:18px;margin-bottom:8px;}
+  .hide{display:none!important;}
+  .saveflag{font-size:12px;color:var(--ingreso);margin-left:8px;}
+  footer{padding:16px 24px;color:var(--muted);font-size:12px;border-top:1px solid var(--line);text-align:center;}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="auth">
+  <h2>Presupuestos <span style="color:var(--accent)">por Proyecto</span></h2>
+  <p id="authSubtitle">Inicia sesion para ver tus proyectos.</p>
+  <div class="err" id="authErr"></div>
+  <input id="fName" class="hide" type="text" placeholder="Nombre">
+  <input id="fEmail" type="email" placeholder="Correo electronico">
+  <input id="fPass" type="password" placeholder="Contrasena (min 6)">
+  <button class="primary" id="authBtn">Entrar</button>
+  <div class="switch" id="authSwitch">No tienes cuenta? <a id="toRegister">Registrate</a></div>
+</div>
+
+<!-- APP -->
+<div id="appRoot" class="hide">
+  <header>
+    <div>
+      <h1>Panel de <span>Presupuestos</span> por Proyecto</h1>
+      <div class="sub">Proyeccion mensual · Real vs Proyectado · Margen · Flujo acumulado <span id="saveFlag" class="saveflag"></span></div>
+    </div>
+    <div class="toolbar">
+      <select id="projSelect"></select>
+      <button id="addProj">+ Proyecto</button>
+      <button id="renameProj">Renombrar</button>
+      <button id="delProj" class="danger">Eliminar</button>
+      <span class="muted" id="userTag" style="font-size:12px;"></span>
+      <button id="logoutBtn">Salir</button>
+    </div>
+  </header>
+  <main>
+    <div class="cards" id="kpis"></div>
+    <div class="grid2">
+      <div class="chartbox"><h3>Ingresos vs Egresos (proyectado)</h3><canvas id="chartIE"></canvas></div>
+      <div class="chartbox"><h3>Flujo de caja acumulado</h3><canvas id="chartAcum"></canvas></div>
+    </div>
+    <div class="grid2">
+      <div class="chartbox"><h3>Real vs Proyectado</h3><canvas id="chartRP"></canvas></div>
+      <div class="chartbox"><h3>Margen y rentabilidad (%)</h3><canvas id="chartMargen"></canvas></div>
+    </div>
+    <div class="tablewrap">
+      <h3 id="tableTitle">Datos mensuales</h3>
+      <table id="dataTable"></table>
+      <div class="legend">Edita cualquier celda. Los cambios se guardan en la base de datos automaticamente.</div>
+    </div>
+  </main>
+  <footer>Datos almacenados en PostgreSQL. Cada usuario ve solo sus proyectos.</footer>
+</div>
+
+<script>
+const API = "/api";
+const MESES=["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+const fmt=n=>new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(n||0);
+const fmtN=n=>new Intl.NumberFormat('es-CO',{maximumFractionDigits:0}).format(n||0);
+const el=id=>document.getElementById(id);
+
+let token = localStorage.getItem("token") || null;
+let projects = [];      // [{id,name,entries:[{month,income_proj,...}]}]
+let current = -1;       // -1 = consolidado
+let charts = {};
+let mode = "login";     // login | register
+let saveTimer = null;
+
+// ---------------- API helper ----------------
+async function api(path, opts={}){
+  opts.headers = Object.assign({"Content-Type":"application/json"}, opts.headers||{});
+  if(token) opts.headers["Authorization"] = "Bearer "+token;
+  const r = await fetch(API+path, opts);
+  if(r.status===401){ logout(); throw new Error("Sesion expirada"); }
+  if(!r.ok){ const e=await r.json().catch(()=>({detail:"Error"})); throw new Error(e.detail||("Error "+r.status)); }
+  return r.status===204 ? null : r.json();
+}
+
+// ---------------- Auth ----------------
+function toggleMode(){
+  mode = mode==="login" ? "register" : "login";
+  el('fName').classList.toggle('hide', mode!=="register");
+  el('authBtn').textContent = mode==="register" ? "Crear cuenta" : "Entrar";
+  el('authSubtitle').textContent = mode==="register" ? "Crea tu cuenta para empezar." : "Inicia sesion para ver tus proyectos.";
+  el('authSwitch').innerHTML = mode==="register" ? 'Ya tienes cuenta? <a id="toRegister">Inicia sesion</a>' : 'No tienes cuenta? <a id="toRegister">Registrate</a>';
+  el('authErr').textContent="";
+  el('toRegister').onclick = toggleMode; // el innerHTML recreo el enlace
+}
+el('toRegister').onclick = toggleMode;
+
+el('authBtn').onclick = async ()=>{
+  el('authErr').textContent="";
+  const email=el('fEmail').value.trim(), pass=el('fPass').value, name=el('fName').value.trim();
+  if(!email||!pass){ el('authErr').textContent="Completa correo y contrasena."; return; }
+  try{
+    if(mode==="register"){
+      await api("/auth/register",{method:"POST",body:JSON.stringify({email,name,password:pass})});
+    }
+    // login (form-urlencoded segun OAuth2)
+    const body = new URLSearchParams({username:email, password:pass});
+    const r = await fetch(API+"/auth/login",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
+    if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.detail||"No se pudo iniciar sesion"); }
+    const data = await r.json();
+    token = data.access_token; localStorage.setItem("token", token);
+    await startApp();
+  }catch(err){ el('authErr').textContent = err.message; }
+};
+
+function logout(){
+  token=null; localStorage.removeItem("token");
+  el('appRoot').classList.add('hide'); el('auth').classList.remove('hide');
+}
+el('logoutBtn').onclick = logout;
+
+// ---------------- App ----------------
+async function startApp(){
+  const u = await api("/auth/me");
+  el('userTag').textContent = u.email;
+  el('auth').classList.add('hide'); el('appRoot').classList.remove('hide');
+  await reload();
+}
+
+async function reload(){
+  projects = await api("/projects");
+  if(projects.length===0){
+    projects = [await api("/projects",{method:"POST",body:JSON.stringify({name:"Proyecto A"})})];
+  }
+  if(current!==-1 && !projects.find(p=>p.id===current)) current=-1;
+  renderAll();
+}
+
+function activeData(){
+  const empty=()=>({ip:0,ir:0,ep:0,er:0});
+  const norm = e=>({ip:+e.income_proj,ir:+e.income_real,ep:+e.expense_proj,er:+e.expense_real});
+  if(current===-1){
+    return MESES.map((_,i)=>{
+      let o=empty();
+      projects.forEach(p=>{const e=p.entries.find(x=>x.month===i+1); if(e){const n=norm(e);o.ip+=n.ip;o.ir+=n.ir;o.ep+=n.ep;o.er+=n.er;}});
+      return o;
+    });
+  }
+  const p=projects.find(x=>x.id===current);
+  return MESES.map((_,i)=>{const e=p.entries.find(x=>x.month===i+1); return e?norm(e):empty();});
+}
+
+function renderSelect(){
+  const s=el('projSelect'); s.innerHTML='';
+  const o0=document.createElement('option'); o0.value=-1; o0.textContent='Consolidado (todos)'; s.appendChild(o0);
+  projects.forEach(p=>{const o=document.createElement('option');o.value=p.id;o.textContent=p.name;s.appendChild(o);});
+  s.value=current;
+}
+
+function renderKPIs(){
+  const d=activeData(); let ip=0,ir=0,ep=0,er=0; d.forEach(m=>{ip+=m.ip;ir+=m.ir;ep+=m.ep;er+=m.er;});
+  const netoP=ip-ep, netoR=ir-er, mP=ip?netoP/ip*100:0, mR=ir?netoR/ir*100:0, ej=ip?ir/ip*100:0;
+  const k=[
+    {l:'Ingresos proyectados',v:fmt(ip)},
+    {l:'Egresos proyectados',v:fmt(ep)},
+    {l:'Resultado neto (proy.)',v:fmt(netoP),c:netoP>=0?'pos':'neg'},
+    {l:'Margen proyectado',v:mP.toFixed(1)+'%',c:mP>=0?'pos':'neg'},
+    {l:'Ingresos reales',v:fmt(ir),d:'Ejecucion: '+ej.toFixed(0)+'%'},
+    {l:'Resultado neto (real)',v:fmt(netoR),c:netoR>=0?'pos':'neg',d:'Margen real: '+mR.toFixed(1)+'%'},
+  ];
+  el('kpis').innerHTML=k.map(x=>`<div class="card"><div class="label">${x.l}</div><div class="val ${x.c||''}">${x.v}</div>${x.d?`<div class="delta">${x.d}</div>`:''}</div>`).join('');
+}
+
+function mk(id,cfg){ if(charts[id])charts[id].destroy(); charts[id]=new Chart(el(id),cfg); }
+function renderCharts(){
+  const d=activeData(), grid='#334155', tick='#94a3b8';
+  const base={responsive:true,plugins:{legend:{labels:{color:tick,font:{size:11}}}},scales:{x:{ticks:{color:tick},grid:{color:grid}},y:{ticks:{color:tick,callback:v=>fmtN(v)},grid:{color:grid}}}};
+  mk('chartIE',{type:'bar',data:{labels:MESES,datasets:[
+    {label:'Ingresos',data:d.map(m=>m.ip),backgroundColor:'#22c55e'},
+    {label:'Egresos',data:d.map(m=>m.ep),backgroundColor:'#ef4444'},
+    {label:'Neto',type:'line',data:d.map(m=>m.ip-m.ep),borderColor:'#38bdf8',tension:.3,fill:false}]},options:base});
+  let ap=0,ar=0; const aP=[],aR=[]; d.forEach(m=>{ap+=m.ip-m.ep;ar+=m.ir-m.er;aP.push(ap);aR.push(ar);});
+  mk('chartAcum',{type:'line',data:{labels:MESES,datasets:[
+    {label:'Acumulado proyectado',data:aP,borderColor:'#a855f7',backgroundColor:'rgba(168,85,247,.15)',tension:.3,fill:true},
+    {label:'Acumulado real',data:aR,borderColor:'#38bdf8',backgroundColor:'rgba(56,189,248,.12)',tension:.3,fill:true}]},options:base});
+  mk('chartRP',{type:'bar',data:{labels:MESES,datasets:[
+    {label:'Ingreso proy.',data:d.map(m=>m.ip),backgroundColor:'rgba(100,116,139,.7)'},
+    {label:'Ingreso real',data:d.map(m=>m.ir),backgroundColor:'#22c55e'},
+    {label:'Egreso proy.',data:d.map(m=>m.ep),backgroundColor:'rgba(100,116,139,.4)'},
+    {label:'Egreso real',data:d.map(m=>m.er),backgroundColor:'#ef4444'}]},options:base});
+  const mP=d.map(m=>m.ip?(m.ip-m.ep)/m.ip*100:0), mR=d.map(m=>m.ir?(m.ir-m.er)/m.ir*100:0);
+  mk('chartMargen',{type:'line',data:{labels:MESES,datasets:[
+    {label:'Margen proyectado %',data:mP,borderColor:'#a855f7',tension:.3,fill:false},
+    {label:'Margen real %',data:mR,borderColor:'#22c55e',tension:.3,fill:false}]},
+    options:{responsive:true,plugins:{legend:{labels:{color:tick,font:{size:11}}}},scales:{x:{ticks:{color:tick},grid:{color:grid}},y:{ticks:{color:tick,callback:v=>v.toFixed(0)+'%'},grid:{color:grid}}}}});
+}
+
+function renderTable(){
+  const consolidated = current===-1;
+  el('tableTitle').textContent = consolidated ? 'Datos mensuales — Consolidado (solo lectura)' : 'Datos mensuales — '+projects.find(p=>p.id===current).name;
+  const d=activeData();
+  const rows=[["ip","Ingreso proyectado"],["ir","Ingreso real"],["ep","Egreso proyectado"],["er","Egreso real"]];
+  let html='<tr><th>Concepto</th>'+MESES.map(m=>`<th>${m}</th>`).join('')+'<th>Total</th></tr>';
+  rows.forEach(([k,label])=>{
+    let tot=0;
+    html+=`<tr><td class="rowhead">${label}</td>`+d.map((m,i)=>{tot+=m[k];
+      return consolidated?`<td>${fmtN(m[k])}</td>`:`<td><input type="number" data-m="${i}" data-k="${k}" value="${m[k]}"></td>`;
+    }).join('')+`<td class="rowhead">${fmtN(tot)}</td></tr>`;
+  });
+  const nP=d.map(m=>m.ip-m.ep), nR=d.map(m=>m.ir-m.er);
+  html+=`<tr><td class="rowhead">Neto proyectado</td>`+nP.map(v=>`<td class="${v>=0?'pos':'neg'}">${fmtN(v)}</td>`).join('')+`<td class="rowhead">${fmtN(nP.reduce((a,b)=>a+b,0))}</td></tr>`;
+  html+=`<tr><td class="rowhead">Neto real</td>`+nR.map(v=>`<td class="${v>=0?'pos':'neg'}">${fmtN(v)}</td>`).join('')+`<td class="rowhead">${fmtN(nR.reduce((a,b)=>a+b,0))}</td></tr>`;
+  const t=el('dataTable'); t.innerHTML=html;
+  if(!consolidated){
+    t.querySelectorAll('input').forEach(inp=>inp.addEventListener('change',onEdit));
+  }
+}
+
+async function onEdit(e){
+  const p=projects.find(x=>x.id===current);
+  const mi=+e.target.dataset.m, k=e.target.dataset.k, val=+e.target.value||0;
+  const map={ip:'income_proj',ir:'income_real',ep:'expense_proj',er:'expense_real'};
+  let entry=p.entries.find(x=>x.month===mi+1);
+  if(!entry){ entry={month:mi+1,income_proj:0,income_real:0,expense_proj:0,expense_real:0}; p.entries.push(entry); }
+  entry[map[k]]=val;
+  renderKPIs(); renderCharts();
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(()=>saveProject(p), 500);
+}
+
+async function saveProject(p){
+  el('saveFlag').textContent="Guardando...";
+  try{
+    const payload = p.entries.map(e=>({month:e.month,income_proj:e.income_proj,income_real:e.income_real,expense_proj:e.expense_proj,expense_real:e.expense_real}));
+    const updated = await api(`/projects/${p.id}/entries`,{method:"PUT",body:JSON.stringify(payload)});
+    const idx=projects.findIndex(x=>x.id===p.id); projects[idx]=updated;
+    el('saveFlag').textContent="Guardado ✓";
+    setTimeout(()=>el('saveFlag').textContent="",1500);
+  }catch(err){ el('saveFlag').textContent="Error al guardar"; }
+}
+
+function renderAll(){ renderSelect(); renderKPIs(); renderCharts(); renderTable(); }
+
+// controles
+el('projSelect').onchange=e=>{current=+e.target.value;renderAll();};
+el('addProj').onclick=async()=>{
+  const name=prompt("Nombre del nuevo proyecto:","Proyecto "+String.fromCharCode(65+projects.length));
+  if(!name)return;
+  const p=await api("/projects",{method:"POST",body:JSON.stringify({name})});
+  projects.push(p); current=p.id; renderAll();
+};
+el('renameProj').onclick=async()=>{
+  if(current===-1){alert("Selecciona un proyecto.");return;}
+  const p=projects.find(x=>x.id===current); const n=prompt("Nuevo nombre:",p.name);
+  if(n){const u=await api(`/projects/${p.id}`,{method:"PUT",body:JSON.stringify({name:n})}); const i=projects.findIndex(x=>x.id===p.id);projects[i]=u;renderAll();}
+};
+el('delProj').onclick=async()=>{
+  if(current===-1){alert("Selecciona un proyecto.");return;}
+  if(projects.length<=1){alert("Debe existir al menos un proyecto.");return;}
+  const p=projects.find(x=>x.id===current);
+  if(confirm(`Eliminar "${p.name}"?`)){await api(`/projects/${p.id}`,{method:"DELETE"});projects=projects.filter(x=>x.id!==p.id);current=-1;renderAll();}
+};
+
+// arranque
+if(token){ startApp().catch(()=>logout()); }
+</script>
+</body>
+</html>
