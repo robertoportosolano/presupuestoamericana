@@ -8,15 +8,19 @@ en el runtime serverless. El frontend estatico se sirve desde /public.
 """
 
 import os
+import base64
+import hashlib
+import hmac
+import secrets as _secrets
 import datetime as dt
 from typing import List, Optional
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr, Field
 from jose import jwt, JWTError
-from passlib.context import CryptContext
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, ForeignKey,
@@ -35,6 +39,15 @@ def _db_url() -> str:
     # SQLAlchemy requiere el esquema postgresql:// (Vercel/Neon a veces dan postgres://)
     if url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql://", 1)
+    # Normaliza los parametros de la cadena de Postgres:
+    #  - elimina channel_binding (psycopg2 puede fallar con require)
+    #  - garantiza sslmode=require (Neon lo exige)
+    if url.startswith("postgresql"):
+        parts = urlsplit(url)
+        q = [(k, v) for k, v in parse_qsl(parts.query) if k.lower() != "channel_binding"]
+        if not any(k.lower() == "sslmode" for k, _ in q):
+            q.append(("sslmode", "require"))
+        url = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(q), parts.fragment))
     return url
 
 DATABASE_URL = _db_url()
@@ -47,7 +60,6 @@ engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args=connect_ar
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 # --------------------------------------------------------------------------
@@ -87,7 +99,14 @@ class MonthlyEntry(Base):
     __table_args__ = (UniqueConstraint("project_id", "month", name="uix_project_month"),)
 
 
-Base.metadata.create_all(bind=engine)
+def init_db():
+    """Crea las tablas si no existen. Se puede reintentar sin romper la app."""
+    Base.metadata.create_all(bind=engine)
+
+try:
+    init_db()
+except Exception as _e:  # no impedir el arranque si la BD aun no responde
+    print("Aviso: no se pudieron crear las tablas al iniciar:", _e)
 
 # --------------------------------------------------------------------------
 # Esquemas Pydantic
@@ -136,11 +155,29 @@ def get_db():
     finally:
         db.close()
 
-def hash_password(p: str) -> str:
-    return pwd_context.hash(p)
+_PBKDF2_ITERS = 200_000
 
-def verify_password(p: str, h: str) -> bool:
-    return pwd_context.verify(p, h)
+def hash_password(p: str) -> str:
+    """Hash de contrasena con PBKDF2-HMAC-SHA256 (libreria estandar, sin dependencias nativas)."""
+    salt = _secrets.token_bytes(16)
+    dk = hashlib.pbkdf2_hmac("sha256", p.encode("utf-8"), salt, _PBKDF2_ITERS)
+    return "pbkdf2_sha256${}${}${}".format(
+        _PBKDF2_ITERS,
+        base64.b64encode(salt).decode("ascii"),
+        base64.b64encode(dk).decode("ascii"),
+    )
+
+def verify_password(p: str, stored: str) -> bool:
+    try:
+        algo, iters, salt_b64, dk_b64 = stored.split("$")
+        if algo != "pbkdf2_sha256":
+            return False
+        salt = base64.b64decode(salt_b64)
+        expected = base64.b64decode(dk_b64)
+        dk = hashlib.pbkdf2_hmac("sha256", p.encode("utf-8"), salt, int(iters))
+        return hmac.compare_digest(dk, expected)
+    except Exception:
+        return False
 
 def create_access_token(sub: str) -> str:
     expire = dt.datetime.utcnow() + dt.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -184,8 +221,18 @@ app.add_middleware(
 )
 
 @app.get("/api/health")
-def health():
-    return {"status": "ok", "db": DATABASE_URL.split("://")[0]}
+def health(db: Session = Depends(get_db)):
+    result = {"status": "ok", "db": DATABASE_URL.split("://")[0]}
+    try:
+        init_db()  # asegura que las tablas existan
+        from sqlalchemy import text
+        db.execute(text("SELECT 1"))
+        result["db_connection"] = "ok"
+    except Exception as e:
+        result["status"] = "error"
+        result["db_connection"] = "fail"
+        result["detail"] = str(e)[:300]
+    return result
 
 # ---- Auth ----
 @app.post("/api/auth/register", response_model=UserOut)
